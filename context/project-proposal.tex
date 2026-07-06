@@ -1,0 +1,551 @@
+\documentclass[11pt,a4paper]{article}
+
+% -------------------- Packages --------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+
+\setlist[itemize]{topsep=3pt,itemsep=2pt,parsep=2pt}
+\setlist[enumerate]{topsep=3pt,itemsep=2pt,parsep=2pt}
+
+% -------------------- Title --------------------
+\title{\textbf{Project Plan}\\[0.5em]
+Patient-Specific Residual INR Priors for Accelerated Follow-up Brain MRI Reconstruction}
+\author{
+Course: Advanced Topics in Deep Learning for Medical Imaging (048350)\\
+Team Members: Omar Garah, Rami Abu Mukh\\
+Student IDs: 211837539, 324276765\\
+Emails: \{garah, ramiab\}@campus.technion.ac.il
+}
+
+\date{}
+\begin{document}
+\maketitle
+
+\section{Motivation and Problem Statement}
+
+The project addresses the problem of \textbf{accelerated follow-up brain MRI reconstruction}. In many clinical settings, patients undergo repeated MRI scans over time in order to monitor disease progression, treatment response, or post-operative changes. Examples include brain tumors, vascular malformations, pituitary lesions, pediatric brain imaging, neurofibromatosis, and other neurological conditions.
+
+MRI acquisition is relatively slow, and reducing scan time is important for patient comfort, scanner availability, and clinical workflow. Accelerated MRI attempts to acquire fewer k-space measurements and reconstruct the full image computationally. However, undersampling k-space can introduce artifacts and reduce diagnostic quality.
+
+In follow-up MRI, the patient often already has a previous scan. This prior scan contains useful patient-specific anatomical information. The challenge is to use this previous scan to improve the reconstruction of the current scan, while avoiding the dangerous failure mode of simply copying the old scan and suppressing true interval changes.
+
+The clinical motivation is therefore:
+
+\begin{quote}
+\textit{Can we use a patient's previous MRI scan as a prior to reconstruct the current follow-up scan from fewer k-space samples, while preserving real anatomical or pathological changes?}
+\end{quote}
+
+The imaging modality involved is \textbf{multi-coil brain MRI}, using undersampled k-space data, coil sensitivity maps, and registered prior DICOM images.
+
+\section{Related Work}
+
+The project is based mainly on the paper:
+
+\begin{quote}
+\textbf{Prior Informed Posterior Sampling: Using a Prior MRI for Accelerated Follow-up MRI Reconstruction.}
+\end{quote}
+
+This paper introduced the Stanford Longitudinally Accelerated MRI Dataset (SLAM) and proposed using a prior MRI scan to improve accelerated follow-up MRI reconstruction. Their method uses a diffusion-based posterior sampling framework.
+
+Additional relevant works include:
+
+\begin{enumerate}
+    \item \textbf{NeRP: Implicit Neural Representation Learning with Prior Embedding for Sparsely Sampled Image Reconstruction.} \\
+    NeRP is highly related to our idea because it uses a prior image and an implicit neural representation for sparse image reconstruction. However, our project focuses specifically on follow-up MRI reconstruction using the SLAM dataset and proposes an explicit prior-plus-residual decomposition.
+
+    \item \textbf{Implicit Neural Representations for MRI Reconstruction.} \\
+    Several recent works use coordinate-based neural networks or INRs for scan-specific MRI reconstruction. These methods reconstruct the image from k-space measurements but usually do not use a registered previous clinical MRI scan as a patient-specific prior.
+
+    \item \textbf{Reference-based and prior-image MRI reconstruction.} \\
+    Classical and deep learning methods have used prior images to improve reconstruction. These methods motivate the use of patient-specific information but may over-constrain the reconstruction toward the old scan.
+
+    \item \textbf{Longitudinal MRI reconstruction methods.} \\
+    Recent methods emphasize that prior scans must be used carefully because real temporal changes may occur between scans. This motivates our focus on residual change modeling and change-aware evaluation.
+\end{enumerate}
+
+\section{Goal}
+
+The main objective of the project is to develop a simple INR-based method for accelerated follow-up brain MRI reconstruction using a registered prior scan.
+
+The proposed method will:
+
+\begin{enumerate}
+    \item Fit an INR to the previous registered DICOM scan.
+    \item Freeze this prior INR as a representation of patient-specific stable anatomy.
+    \item Learn a residual INR from the current undersampled k-space.
+    \item Reconstruct the current scan as
+    \begin{equation}
+    \hat{x}_{\mathrm{current}}(\mathbf{c})
+    =
+    f_{\theta}^{\mathrm{prior}}(\mathbf{c})
+    +
+    r_{\phi}^{\mathrm{current}}(\mathbf{c}),
+    \end{equation}
+    where $f_{\theta}^{\mathrm{prior}}$ represents the prior scan, $r_{\phi}^{\mathrm{current}}$ represents the residual update needed to match the current scan, and $\mathbf{c}$ is a spatial coordinate.
+\end{enumerate}
+
+The project relates to PIPS because both use a previous MRI scan to improve accelerated follow-up reconstruction. However, PIPS uses a diffusion-based prior, while our project uses a patient-specific implicit neural representation.
+
+The project relates to NeRP because both use INRs and prior images. However, our method explicitly decomposes the current scan into
+
+\begin{equation}
+\text{current scan}
+=
+\text{prior anatomy}
++
+\text{residual change}.
+\end{equation}
+
+This residual formulation is intended to better preserve interval changes compared to direct prior-constrained reconstruction.
+
+\section{Dataset(s)}
+
+The primary dataset will be the \textbf{Stanford Longitudinally Accelerated MRI Dataset (SLAM)}, introduced in the PIPS paper.
+
+SLAM contains follow-up brain MRI scans collected at Stanford Hospital. Each scan may include:
+
+\begin{itemize}
+    \item current follow-up reconstruction,
+    \item multi-coil k-space,
+    \item coil sensitivity maps,
+    \item sampling mask,
+    \item registered prior DICOM image when available.
+\end{itemize}
+
+The dataset metadata includes:
+
+\begin{itemize}
+    \item \texttt{recon\_path}: reference reconstruction,
+    \item \texttt{ksp\_path}: k-space, sensitivity maps, and mask,
+    \item \texttt{prior\_path}: registered prior image,
+    \item \texttt{has\_prior}: whether a prior scan exists,
+    \item \texttt{change\_extent}: radiologist-annotated amount of change between the prior and current scan,
+    \item \texttt{exam\_interval}: time between scans,
+    \item \texttt{scan\_type}, \texttt{Protocol}, \texttt{scan\_plane}, and acquisition details.
+\end{itemize}
+
+According to the available train CSV that we inspected, the training split contains:
+
+\begin{itemize}
+    \item 207 training scans,
+    \item 80 scans with prior images,
+    \item 127 scans without prior images.
+\end{itemize}
+
+Among the prior cases in the train split, the change labels include:
+
+\begin{itemize}
+    \item \texttt{change\_extent = 0}: no change,
+    \item \texttt{change\_extent = 1}: small change,
+    \item \texttt{change\_extent = 2}: large change.
+\end{itemize}
+
+For the first version of the project, we will focus on
+
+\begin{equation}
+\texttt{has\_prior = True}
+\end{equation}
+
+and initially perform \textbf{2D slice-wise reconstruction}, using slices between \texttt{slc\_start\_idx} and \texttt{slc\_end\_idx}.  
+
+The dataset is publicly accessible through the SLAM/LAPS dataset resources associated with the PIPS paper. The annotations used in this project are not segmentation masks, but rather scan-level longitudinal change labels through \texttt{change\_extent}.
+
+\section{Proposed Method}
+
+\subsection{Planned Approach}
+
+The proposed method is a two-stage patient-specific INR reconstruction framework.
+
+\subsection{Stage 1: Prior INR Fitting}
+
+Given the registered prior magnitude image $m_{\mathrm{prior}}$, we fit an INR:
+
+\begin{equation}
+    f_{\theta}^{\mathrm{prior}}(\mathbf{c})
+    \approx
+    m_{\mathrm{prior}}(\mathbf{c}),
+\end{equation}
+
+where $\mathbf{c}$ is a spatial coordinate. In the first implementation, $\mathbf{c}=(x,y)$ for a single 2D slice.
+
+The prior fitting loss will be:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{prior}}
+    =
+    \left\|
+    f_{\theta}^{\mathrm{prior}}
+    -
+    m_{\mathrm{prior}}
+    \right\|_1.
+\end{equation}
+
+After training, the prior INR will be frozen. This makes the prior branch interpretable as the patient's previous anatomy.
+
+\subsection{Stage 2: Residual INR Reconstruction from Current k-space}
+
+The current follow-up image will be modeled as:
+
+\begin{equation}
+    \hat{x}_{\mathrm{current}}(\mathbf{c})
+    =
+    f_{\theta}^{\mathrm{prior}}(\mathbf{c})
+    +
+    r_{\phi}^{\mathrm{current}}(\mathbf{c}),
+\end{equation}
+
+where $r_{\phi}^{\mathrm{current}}$ is a residual INR learned from the current undersampled k-space.
+
+The reconstruction will be constrained using the MRI forward model:
+
+\begin{equation}
+    y
+    \approx
+    MFS\hat{x}_{\mathrm{current}},
+\end{equation}
+
+where:
+
+\begin{itemize}
+    \item $y$ is the measured multi-coil k-space,
+    \item $M$ is the sampling mask,
+    \item $F$ is the Fourier transform,
+    \item $S$ is the coil sensitivity map operator.
+\end{itemize}
+
+The data consistency loss is:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{dc}}
+    =
+    \left\|
+    MFS\hat{x}_{\mathrm{current}}
+    -
+    y
+    \right\|_2^2.
+\end{equation}
+
+To prevent the residual from learning the entire image and ignoring the prior, we add residual regularization:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{res}}
+    =
+    \lambda
+    \left\|
+    r_{\phi}^{\mathrm{current}}
+    \right\|_1.
+\end{equation}
+
+The total loss is:
+
+\begin{equation}
+    \mathcal{L}
+    =
+    \left\|
+    MFS
+    \left(
+    f_{\theta}^{\mathrm{prior}}
+    +
+    r_{\phi}^{\mathrm{current}}
+    \right)
+    -
+    y
+    \right\|_2^2
+    +
+    \lambda
+    \left\|
+    r_{\phi}^{\mathrm{current}}
+    \right\|_1.
+\end{equation}
+
+If time allows, we may add total variation regularization on the residual:
+
+\begin{equation}
+    \mathcal{L}
+    =
+    \left\|
+    MFS
+    \left(
+    f_{\theta}^{\mathrm{prior}}
+    +
+    r_{\phi}^{\mathrm{current}}
+    \right)
+    -
+    y
+    \right\|_2^2
+    +
+    \lambda_1
+    \left\|
+    r_{\phi}^{\mathrm{current}}
+    \right\|_1
+    +
+    \lambda_2 TV\left(r_{\phi}^{\mathrm{current}}\right).
+\end{equation}
+
+\subsection{Baseline Methods}
+
+We plan to compare against the following baselines:
+
+\begin{enumerate}
+    \item \textbf{AHb / zero-filled SENSE reconstruction.} \\
+    A simple reconstruction baseline from the undersampled k-space.
+
+    \item \textbf{Prior-copy baseline.} \\
+    Directly use the registered prior image as the reconstruction. This tests whether the prior alone is enough.
+
+    \item \textbf{Current-scan INR without prior.} \\
+    Train an INR only from the current undersampled k-space. This tests whether using the prior helps.
+
+    \item \textbf{Prior-regularized reconstruction.} \\
+    Reconstruct the current image with a penalty encouraging similarity to the prior image.
+
+    \item \textbf{NeRP-like prior INR baseline.} \\
+    Use a prior INR without explicit residual decomposition. This is the closest INR baseline.
+
+    \item \textbf{Proposed method: frozen prior INR + residual INR.} \\
+    Reconstruct the current scan as prior anatomy plus learned residual change.
+\end{enumerate}
+
+If time allows, we will also compare against L1-wavelet/FISTA or PIPS/LAPS if usable code is available.
+
+\subsection{Model Architecture}
+
+The first model will be a simple coordinate-based MLP with positional encoding or Fourier features.
+
+We will implement two INRs:
+
+\begin{enumerate}
+    \item Prior INR:
+    \begin{equation}
+        f_{\theta}^{\mathrm{prior}}(\mathbf{c})
+    \end{equation}
+
+    \item Residual INR:
+    \begin{equation}
+        r_{\phi}^{\mathrm{current}}(\mathbf{c})
+    \end{equation}
+\end{enumerate}
+
+The prior INR will be trained on the prior image and frozen. The residual INR will be trained from the current k-space using data consistency.
+
+In the first version, the method will be implemented slice-wise in 2D. If this works, we may extend it to 2.5D or 3D by adding the slice index as an additional coordinate.
+
+\subsection{Main Novelty}
+
+The main novelty is the explicit residual decomposition for follow-up MRI reconstruction:
+
+\begin{equation}
+    \text{current follow-up MRI}
+    =
+    \text{prior INR}
+    +
+    \text{residual INR}.
+\end{equation}
+
+This differs from directly reconstructing the current scan or directly forcing the current scan to match the prior. The residual branch gives the model a place to represent real interval changes while still benefiting from the previous scan.
+
+\section{Evaluation Plan}
+
+\subsection{Metrics}
+
+We will use standard reconstruction metrics:
+
+\begin{itemize}
+    \item PSNR,
+    \item SSIM,
+    \item NMSE or NRMSE,
+    \item HFEN, if time allows.
+\end{itemize}
+
+Because this is a follow-up MRI problem, we will also use change-aware metrics.
+
+The first change-aware metric will be \textbf{change preservation error}:
+
+\begin{equation}
+    \mathrm{CPE}
+    =
+    \left\|
+    \left(
+    |\hat{x}_{\mathrm{recon}}|
+    -
+    m_{\mathrm{prior}}
+    \right)
+    -
+    \left(
+    |x_{\mathrm{ref}}|
+    -
+    m_{\mathrm{prior}}
+    \right)
+    \right\|_1.
+\end{equation}
+
+This measures whether the method preserves the difference between the current scan and the prior scan.
+
+We will also use a \textbf{prior bias score}:
+
+\begin{equation}
+    \mathrm{PBS}
+    =
+    \frac{
+    \left\|
+    |\hat{x}_{\mathrm{recon}}|
+    -
+    m_{\mathrm{prior}}
+    \right\|_1
+    }{
+    \left\|
+    |x_{\mathrm{ref}}|
+    -
+    m_{\mathrm{prior}}
+    \right\|_1
+    +
+    \epsilon
+    }.
+\end{equation}
+
+If this score is much smaller than 1, it may indicate that the reconstruction is too similar to the prior and is suppressing real changes.
+
+\subsection{Validation}
+
+The reconstructed images will be compared to the SLAM reference reconstructions. Results will be reported:
+
+\begin{enumerate}
+    \item across all prior cases,
+    \item separately for \texttt{change\_extent = 0},
+    \item separately for \texttt{change\_extent = 1},
+    \item separately for \texttt{change\_extent = 2}.
+\end{enumerate}
+
+This is important because a method that copies the prior may perform well on no-change cases but fail on cases with large changes.
+
+\subsection{Planned Experiments}
+
+\begin{enumerate}
+    \item \textbf{Proof-of-concept experiment.} \\
+    Run 2D slice-wise reconstruction on a subset of SLAM scans with available priors.
+
+    \item \textbf{Baseline comparison.} \\
+    Compare the proposed method with AHb, prior-copy, current-scan INR, prior-regularized reconstruction, and NeRP-like prior INR.
+
+    \item \textbf{Residual ablation.} \\
+    Compare prior INR only, current-scan INR only, prior INR plus residual INR, and different strengths of residual regularization.
+
+    \item \textbf{Acceleration study.} \\
+    Evaluate performance at different retrospective undersampling rates.
+
+    \item \textbf{Change-aware analysis.} \\
+    Report metrics separately for no-change, small-change, and large-change cases.
+\end{enumerate}
+
+\section{Expected Challenges}
+
+\subsection{Technical and Practical Challenges}
+
+\begin{enumerate}
+    \item \textbf{Similarity to NeRP.} \\
+    NeRP is closely related because it also uses a prior image and INR. To address this, we will include a NeRP-like baseline and focus on the explicit residual decomposition and change-aware evaluation.
+
+    \item \textbf{Residual branch may become too strong.} \\
+    If the residual INR is too expressive, it may learn the whole current image and ignore the prior. We will control this using a smaller residual network and L1/TV regularization.
+
+    \item \textbf{Complex k-space versus magnitude prior.} \\
+    The prior DICOM is magnitude-only, while MRI k-space is complex-valued. In the first version, we will evaluate magnitude reconstructions. If needed, the residual INR can be extended to output real and imaginary components.
+
+    \item \textbf{Runtime.} \\
+    Per-scan INR optimization can be slow. We will begin with 2D slice-wise experiments and a small network to keep the project feasible.
+
+    \item \textbf{Dataset heterogeneity.} \\
+    SLAM contains different protocols, contrasts, scan planes, and pathologies. We will start with a cleaner subset and later test generalization across scan types.
+\end{enumerate}
+
+\subsection{Fallback Plan}
+
+If the full k-space reconstruction pipeline is too difficult, we will first perform an image-domain proof-of-concept:
+
+\begin{enumerate}
+    \item Fit an INR to the prior image.
+    \item Learn a residual INR to match the current reference reconstruction in image space.
+    \item Evaluate whether the residual INR captures differences from the prior.
+\end{enumerate}
+
+After validating the idea in image space, we will add k-space data consistency.
+
+If the proposed residual method does not improve over the NeRP-like baseline, we will reframe the project as an empirical comparison of different prior-INR strategies for follow-up MRI reconstruction on SLAM.
+
+\section{Timeline and Team Responsibilities}
+
+\subsection{Team Responsibilities}
+
+\textbf{Team member 1:}
+\begin{itemize}
+    \item Dataset download and preprocessing.
+    \item Loading SLAM \texttt{.npz} files.
+    \item Implementing AHb / zero-filled reconstruction baseline.
+    \item Preparing evaluation scripts and visualization figures.
+\end{itemize}
+
+\textbf{Team member 2:}
+\begin{itemize}
+    \item Implementing prior INR and residual INR.
+    \item Implementing data-consistency loss.
+    \item Running ablations and baseline comparisons.
+    \item Writing methods and results sections.
+\end{itemize}
+
+Both team members will work together on debugging, analysis, final report writing, and presentation preparation.
+
+\subsection{Tentative Milestones}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{p{0.22\linewidth}p{0.68\linewidth}}
+\toprule
+\textbf{Date} & \textbf{Milestone} \\
+\midrule
+18.06.2026 & Project plan submission. Finalize proposal and submit PDF. \\
+19.06--23.06 & Dataset and baseline setup. Download SLAM, inspect train/test files, implement data loading, visualize examples, and run AHb baseline. \\
+24.06--27.06 & Prior INR implementation. Fit INR to registered prior images and evaluate prior fitting quality. \\
+28.06--01.07 & Residual INR reconstruction. Implement residual INR and k-space data-consistency loss. \\
+02.07--04.07 & Experiments and ablations. Run baseline comparisons, residual ablations, and acceleration-rate experiments. \\
+05.07--06.07 & Evaluation and figures. Compute PSNR, SSIM, NMSE, change preservation error, and prior bias score. Prepare qualitative figures. \\
+07.07 & Report and presentation preparation. Finalize 2--4 page project report, README, and presentation. \\
+08.07.2026 & Final submission. Submit ZIP file with code, README, report, and presentation. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{References}
+
+\begin{enumerate}
+    \item Shah, Z., Urman, Y., et al. \textit{Prior Informed Posterior Sampling: Using a Prior MRI for Accelerated Follow-up MRI Reconstruction}. arXiv:2407.00537.
+
+    \item Shen, L., Pauly, J., Xing, L. \textit{NeRP: Implicit Neural Representation Learning with Prior Embedding for Sparsely Sampled Image Reconstruction}. arXiv:2108.10991.
+
+    \item Stanford Longitudinally Accelerated MRI Dataset (SLAM). Dataset and resources associated with the PIPS/LAPS project.
+
+    \item Sitzmann, V., Martel, J., Bergman, A., Lindell, D., Wetzstein, G. \textit{Implicit Neural Representations with Periodic Activation Functions}. NeurIPS, 2020.
+
+    \item Tancik, M., Srinivasan, P., Mildenhall, B., et al. \textit{Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains}. NeurIPS, 2020.
+
+    \item Lustig, M., Donoho, D., Pauly, J. \textit{Sparse MRI: The Application of Compressed Sensing for Rapid MR Imaging}. Magnetic Resonance in Medicine, 2007.
+
+    \item Uecker, M., Lai, P., Murphy, M. J., et al. \textit{ESPIRiT: An Eigenvalue Approach to Autocalibrating Parallel MRI}. Magnetic Resonance in Medicine, 2014.
+\end{enumerate}
+
+\end{document}

@@ -1,0 +1,92 @@
+"""Reconstruct one real SLAM test slice with the prior+residual INR.
+
+Compares against zero-filled and prior-copy baselines and reports fidelity +
+change-aware metrics against the reference recon.
+
+    python scripts/recon_slice.py --index 0 --middle-only
+
+Requires the SLAM data to be downloaded first (scripts/fetch_slam.py).
+"""
+
+import argparse
+import os
+import sys
+
+import torch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from presinr.data.slam import SlamTestSlices
+from presinr.forward import CartesianSense
+from presinr.metrics import all_metrics
+from presinr.models import PriorResidualINR, build_inr
+from presinr.recon import PriorFitConfig, ResidualFitConfig, fit_prior, fit_residual
+from presinr.utils import get_device, save_magnitude_panel, set_seed
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--index", type=int, default=0)
+    ap.add_argument("--middle-only", action="store_true")
+    ap.add_argument("--prior-iters", type=int, default=3000)
+    ap.add_argument("--resid-iters", type=int, default=3000)
+    ap.add_argument("--lambda-res", type=float, default=1e-3)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", type=str, default="reports/recon_slice.png")
+    args = ap.parse_args()
+
+    set_seed(args.seed)
+    device = get_device()
+
+    ds = SlamTestSlices(middle_only=args.middle_only, normalize=True)
+    print(f"loaded {len(ds)} test slices")
+    sample = ds[args.index]
+    ksp = sample["ksp"].to(device)
+    mps = sample["mps"].to(device)
+    mask = sample["mask"].to(device)
+    ref = sample["recon"].to(device)
+    prior = sample["prior"].to(device)
+    H, W = ref.shape
+    print(f"slice shape={tuple(ref.shape)} Nc={mps.shape[0]} "
+          f"change_extent={sample['change_extent']}")
+    assert ksp.shape[-2:] == mps.shape[-2:] == mask.shape, (
+        f"shape mismatch ksp{tuple(ksp.shape)} mps{tuple(mps.shape)} mask{tuple(mask.shape)}"
+    )
+
+    op = CartesianSense(mps, mask).to(device)
+    zero_filled = op.adjoint(ksp)
+    prior_copy = prior.to(torch.complex64)
+
+    prior_inr = build_inr("siren", out_features=1, hidden_features=256, hidden_layers=4)
+    fit_prior(prior_inr, prior, PriorFitConfig(iters=args.prior_iters), device=device)
+
+    residual_inr = build_inr("siren", out_features=2, hidden_features=128, hidden_layers=4)
+    model = PriorResidualINR(prior_inr, residual_inr).to(device)
+    result = fit_residual(
+        model, op, ksp, (H, W),
+        ResidualFitConfig(iters=args.resid_iters, lambda_res=args.lambda_res),
+        device=device,
+    )
+    recon = result.recon
+
+    print("\n=== metrics vs. reference recon (magnitude) ===")
+    print(f"{'method':24s} {'PSNR':>7s} {'SSIM':>7s} {'NMSE':>8s} {'CPE':>8s} {'PBS':>7s}")
+    for name, img in [
+        ("zero-filled", zero_filled),
+        ("prior-copy", prior_copy),
+        ("prior+residual (ours)", recon),
+    ]:
+        m = all_metrics(img, ref, prior)
+        print(f"{name:24s} {m['psnr']:7.2f} {m['ssim']:7.3f} {m['nmse']:8.4f} "
+              f"{m['cpe']:8.4f} {m['pbs']:7.3f}")
+
+    out = save_magnitude_panel(
+        [prior, ref, zero_filled, recon, (recon - ref)],
+        ["prior", "reference", "zero-filled", "ours", "|ours - ref|"],
+        args.out,
+    )
+    print(f"\nsaved qualitative panel -> {out}")
+
+
+if __name__ == "__main__":
+    main()

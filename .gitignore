@@ -1,0 +1,20 @@
+# data & large artifacts (top-level only; not the src/presinr/data package)
+/data/
+/reports/
+*.ckpt
+*.pth
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+build/
+dist/
+
+# env / editor
+.venv/
+.vscode/
+.idea/
+.DS_Store

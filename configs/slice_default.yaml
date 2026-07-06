@@ -1,0 +1,30 @@
+# Default configuration for 2-D slice-wise prior+residual INR reconstruction.
+
+seed: 0
+
+prior_inr:
+  kind: siren
+  hidden_features: 256
+  hidden_layers: 4
+
+residual_inr:
+  kind: siren
+  hidden_features: 128      # smaller than prior: discourages relearning the whole image
+  hidden_layers: 4
+
+prior_fit:
+  iters: 3000
+  lr: 1.0e-4
+
+residual_fit:
+  iters: 3000
+  lr: 1.0e-3
+  lambda_res: 1.0e-3        # L1 sparsity on the complex residual
+  lambda_tv: 0.0            # TV on the residual magnitude (0 = off)
+  lambda_gate: 0.0          # reserved for the gated variant
+
+# gate is disabled for the first (plain prior+residual) target model
+gate:
+  enabled: false
+  hidden_features: 64
+  hidden_layers: 3
