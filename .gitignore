@@ -1,6 +1,5 @@
-# data & large artifacts (top-level only; not the src/presinr/data package)
+# data (multi-GB SLAM download; top-level only, not the src/presinr/data package)
 /data/
-/reports/
 *.ckpt
 *.pth
 

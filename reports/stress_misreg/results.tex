@@ -1,0 +1,71 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.9in]{geometry}\usepackage{graphicx,booktabs,amsmath,float}
+\title{Robustness to Prior Misregistration: the Trust Gate}
+\author{Patient-Specific Residual INR --- SLAM Ax\_T2\_2D, change\_extent=0}
+\date{\today}\begin{document}\maketitle
+\section*{Setup}
+A well-registered follow-up slice is reconstructed from 50\% of its pixels (random). The prior is deliberately shifted by $s$ pixels before use, so the \emph{only} source of prior error is misregistration. A method that over-trusts the prior ghosts the shifted anatomy into unobserved regions. \textbf{current-only INR} uses no prior (robust floor); \textbf{prior-finetune} is NeRP-style; \textbf{ours} adds a frozen prior; \textbf{ours+gate} adds a spatial trust gate $g(c)\in[0,1]$ that opens where the prior conflicts with the data.
+\begin{table}[H]\centering
+\caption{Reconstruction vs.\ prior shift $s$ (px) at 50\% supervision. PSNR/SSIM higher = better; PBS $\approx1$ preserves structure.}
+\begin{tabular}{llrrrr}\toprule
+shift & method & PSNR & SSIM & NMSE & PBS \\ \midrule
+0 & prior-copy & 24.22 & 0.826 & 0.0707 & 0.000 \\
+ & current-only INR & 31.01 & 0.910 & 0.0148 & 1.066 \\
+ & prior-finetune (NeRP) & 32.02 & 0.927 & 0.0117 & 1.051 \\
+ & prior+residual (ours) & 30.99 & 0.885 & 0.0149 & 0.949 \\
+ & \textbf{prior+gated residual (ours+gate)} & 31.36 & 0.941 & 0.0137 & 0.931 \\
+\midrule
+4 & prior-copy & 16.19 & 0.509 & 0.4483 & 2.526 \\
+ & current-only INR & 30.98 & 0.911 & 0.0149 & 1.065 \\
+ & prior-finetune (NeRP) & 31.17 & 0.921 & 0.0143 & 1.067 \\
+ & prior+residual (ours) & 27.72 & 0.807 & 0.0316 & 1.187 \\
+ & \textbf{prior+gated residual (ours+gate)} & 28.55 & 0.908 & 0.0261 & 1.140 \\
+\midrule
+8 & prior-copy & 15.37 & 0.481 & 0.5422 & 2.997 \\
+ & current-only INR & 31.18 & 0.908 & 0.0142 & 1.079 \\
+ & prior-finetune (NeRP) & 30.87 & 0.917 & 0.0153 & 1.074 \\
+ & prior+residual (ours) & 28.33 & 0.790 & 0.0274 & 1.213 \\
+ & \textbf{prior+gated residual (ours+gate)} & 28.69 & 0.895 & 0.0252 & 1.125 \\
+\midrule
+12 & prior-copy & 15.09 & 0.460 & 0.5780 & 3.231 \\
+ & current-only INR & 31.01 & 0.913 & 0.0148 & 1.070 \\
+ & prior-finetune (NeRP) & 30.73 & 0.913 & 0.0158 & 1.078 \\
+ & prior+residual (ours) & 28.15 & 0.759 & 0.0286 & 1.218 \\
+ & \textbf{prior+gated residual (ours+gate)} & 28.77 & 0.882 & 0.0248 & 1.134 \\
+\midrule
+16 & prior-copy & 14.65 & 0.431 & 0.6404 & 3.562 \\
+ & current-only INR & 30.92 & 0.909 & 0.0151 & 1.089 \\
+ & prior-finetune (NeRP) & 30.69 & 0.908 & 0.0159 & 1.086 \\
+ & prior+residual (ours) & 28.57 & 0.760 & 0.0259 & 1.204 \\
+ & \textbf{prior+gated residual (ours+gate)} & 28.87 & 0.868 & 0.0242 & 1.153 \\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[H]\centering
+\caption{Mean gate opening $\overline{g}$ vs.\ prior shift (higher = the gate trusts the prior less). The gate should open as misregistration grows.}
+\begin{tabular}{lrrrrr}\toprule
+shift (px) & 0 & 4 & 8 & 12 & 16 \\
+$\overline{g}$ & 0.032 & 0.065 & 0.073 & 0.078 & 0.084 \\ \bottomrule
+\end{tabular}\end{table}
+\begin{figure}[H]\centering\includegraphics[width=0.7\linewidth]{degradation.png}
+\caption{PSNR vs.\ prior shift. current-only is flat (no prior); naive prior methods degrade as the prior worsens; the gate degrades more gracefully.}\end{figure}
+\section*{Qualitative panels}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{panel_s00.png}
+\caption{Prior shift $s=0$ px. Left to right: shifted prior, reference, NeRP, ours (frozen+residual), ours+gate, and the gate map $g$ (white = open = distrust prior).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{panel_s04.png}
+\caption{Prior shift $s=4$ px. Left to right: shifted prior, reference, NeRP, ours (frozen+residual), ours+gate, and the gate map $g$ (white = open = distrust prior).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{panel_s08.png}
+\caption{Prior shift $s=8$ px. Left to right: shifted prior, reference, NeRP, ours (frozen+residual), ours+gate, and the gate map $g$ (white = open = distrust prior).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{panel_s12.png}
+\caption{Prior shift $s=12$ px. Left to right: shifted prior, reference, NeRP, ours (frozen+residual), ours+gate, and the gate map $g$ (white = open = distrust prior).}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{panel_s16.png}
+\caption{Prior shift $s=16$ px. Left to right: shifted prior, reference, NeRP, ours (frozen+residual), ours+gate, and the gate map $g$ (white = open = distrust prior).}
+\end{figure}
+\end{document}
