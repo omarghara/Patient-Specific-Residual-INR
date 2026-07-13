@@ -27,8 +27,14 @@ class CartesianSense(nn.Module):
         assert mps.ndim == 3, "mps must be (Nc, Nx, Ny)"
         self.n_coils, self.nx, self.ny = mps.shape
         if mask is None:
-            mask = torch.ones(self.nx, self.ny)
+            mask = torch.ones(self.nx, self.ny, device=mps.device)
         mask = mask.to(torch.float32)
+        if tuple(mask.shape) != (self.nx, self.ny):
+            raise ValueError(
+                f"mask must have shape {(self.nx, self.ny)}, got {tuple(mask.shape)}"
+            )
+        if not torch.any(mask != 0):
+            raise ValueError("sampling mask contains no measured samples")
         self.register_buffer("mps", mps.to(torch.complex64))
         self.register_buffer("mask", mask)
 

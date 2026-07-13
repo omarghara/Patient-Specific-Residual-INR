@@ -3,6 +3,7 @@
 import os
 import sys
 
+import pytest
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -24,6 +25,14 @@ def test_shapes():
     y = op(x)
     assert y.shape == (nc, n, n)
     assert op.adjoint(y).shape == (n, n)
+
+
+def test_operator_rejects_invalid_or_empty_mask():
+    mps = torch.ones(2, 8, 7, dtype=torch.complex64)
+    with pytest.raises(ValueError, match="mask must have shape"):
+        CartesianSense(mps, torch.ones(8, 8))
+    with pytest.raises(ValueError, match="no measured"):
+        CartesianSense(mps, torch.zeros(8, 7))
 
 
 def test_adjoint_dot_product():

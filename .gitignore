@@ -13,6 +13,15 @@ __pycache__/
 build/
 dist/
 
+# latex build artifacts (keep .tex and .pdf)
+*.aux
+*.log
+*.synctex.gz
+*.out
+*.fls
+*.fdb_latexmk
+*.toc
+
 # env / editor
 .venv/
 .vscode/

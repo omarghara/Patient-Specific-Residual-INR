@@ -9,11 +9,13 @@ matching the proposal's ``x_current(c) = f_prior(c) + r_current(c)``. The prior
 INR carries stable patient anatomy (magnitude); the residual INR carries the
 interval change and the phase needed for k-space data consistency.
 
-An optional spatial ``gate`` g(c) in [0, 1] multiplies the residual
-(``x_hat = m_prior + g * r``). It is disabled by default -- the first target is
-the plain prior+residual model; the gate is a later upgrade.
+An optional spatial support ``gate`` g(c) in [0, 1] multiplies the residual
+(``x_hat = m_prior + g * r``). For an interpretable, numerically identifiable
+gated objective, use a finite ``residual_bound`` and regularize the pre-gate
+residual as well as the effective product.
 """
 
+import math
 from typing import Optional, Tuple
 
 import torch
@@ -32,6 +34,10 @@ class PriorResidualINR(nn.Module):
         self.prior_inr = prior_inr
         self.residual_inr = residual_inr
         self.gate_inr = gate_inr
+        if residual_bound is not None and (
+            not math.isfinite(residual_bound) or residual_bound <= 0
+        ):
+            raise ValueError(f"residual_bound must be finite and positive, got {residual_bound}")
         self.residual_bound = residual_bound
 
     def freeze_prior(self):
@@ -55,6 +61,20 @@ class PriorResidualINR(nn.Module):
             return None
         return torch.sigmoid(self.gate_inr(coords)[..., 0])
 
+    def residual_components(
+        self, coords: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+        """Return ``(residual, effective_residual, gate)`` at ``coords``.
+
+        ``residual`` is post-bound but pre-gate. Keeping it explicit is important:
+        gated objectives must regularize this component, rather than only the
+        product ``gate * residual``, to avoid a scale degeneracy.
+        """
+        residual = self.residual(coords)
+        gate = self.gate(coords)
+        effective = residual if gate is None else gate[..., None] * residual
+        return residual, effective, gate
+
     def forward(
         self,
         coords: torch.Tensor,
@@ -67,11 +87,8 @@ class PriorResidualINR(nn.Module):
         re-evaluating the prior INR each iteration.
         """
         m = prior_mag if prior_mag is not None else self.prior_magnitude(coords)
-        r = self.residual(coords)
-        g = self.gate(coords)
-        if g is not None:
-            r = g[..., None] * r
-        real = m + r[..., 0]
-        imag = r[..., 1]
+        _, effective, _ = self.residual_components(coords)
+        real = m + effective[..., 0]
+        imag = effective[..., 1]
         x = torch.complex(real, imag)
         return x.reshape(*shape)

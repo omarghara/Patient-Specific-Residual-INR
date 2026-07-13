@@ -72,11 +72,17 @@ def main():
         ("prior+residual (ours)", recon),
     ]
     print("\n=== metrics vs. ground-truth current (magnitude) ===")
-    print(f"{'method':24s} {'PSNR':>7s} {'SSIM':>7s} {'NMSE':>8s} {'CPE':>8s} {'PBS':>7s}")
+    print(
+        f"{'method':24s} {'PSNR':>7s} {'SSIM':>7s} {'NMSE':>8s} "
+        f"{'D-cos':>7s} {'D-gain':>8s} {'MI(P,F)':>8s} {'MI-d':>8s}"
+    )
     for name, img in rows:
         m = all_metrics(img, gt, prior)
-        print(f"{name:24s} {m['psnr']:7.2f} {m['ssim']:7.3f} {m['nmse']:8.4f} "
-              f"{m['cpe']:8.4f} {m['pbs']:7.3f}")
+        print(
+            f"{name:24s} {m['psnr']:7.2f} {m['ssim']:7.3f} {m['nmse']:8.4f} "
+            f"{m['change_cosine']:7.3f} {m['change_gain']:8.3f} "
+            f"{m['mi_prior_ref']:8.3f} {m['mi_prior_delta']:8.3f}"
+        )
 
     out = save_magnitude_panel(
         [prior, gt, zero_filled, recon, (recon - gt)],

@@ -22,9 +22,12 @@ residual_fit:
   lambda_res: 1.0e-3        # L1 sparsity on the complex residual
   lambda_tv: 0.0            # TV on the residual magnitude (0 = off)
   lambda_gate: 0.0          # reserved for the gated variant
+  lambda_raw_res: 0.0       # set >0 with a gate to remove g*r scale degeneracy
+  lambda_gate_tv: 0.0       # spatial smoothing on the gate itself
 
 # gate is disabled for the first (plain prior+residual) target model
 gate:
   enabled: false
   hidden_features: 64
   hidden_layers: 3
+  residual_bound: 1.0       # required together with raw-residual penalty when enabled

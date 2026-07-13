@@ -2,17 +2,37 @@
 
 Total stage-2 loss (proposal Eq. for the plain model)::
 
-    L = ||M F S x_hat - y||_2^2  +  lambda_res * ||r||_1  [ + lambda_tv * TV(r) ]
+    L = ||M F S x_hat - y||_2^2 + lambda_eff ||g r||_1
+        + lambda_raw ||r||_1 + lambda_gate ||g||_1 + lambda_gate_tv TV(g)
 
-with optional gate terms reserved for the later gated variant.
+The plain residual model is the special case ``g = 1``.
 """
 
 import torch
 
 
-def data_consistency(y_pred: torch.Tensor, y_meas: torch.Tensor) -> torch.Tensor:
-    """Mean squared k-space error over measured points (complex)."""
-    return (y_pred - y_meas).abs().pow(2).mean()
+def data_consistency(
+    y_pred: torch.Tensor,
+    y_meas: torch.Tensor,
+    mask: torch.Tensor = None,
+) -> torch.Tensor:
+    """Mean squared complex k-space error over measured samples only.
+
+    Dividing by the full zero-filled grid makes regularization strength depend on
+    acceleration. Supplying the acquisition mask keeps the data-term scale tied
+    to the number of actual measurements instead.
+    """
+    error = (y_pred - y_meas).abs().pow(2)
+    if mask is None:
+        return error.mean()
+    weights = mask.to(device=error.device, dtype=error.dtype)
+    while weights.ndim < error.ndim:
+        weights = weights.unsqueeze(0)
+    weights = weights.expand_as(error)
+    # The forward operator validates nonempty acquisition masks once at
+    # construction time. Avoid a GPU-to-CPU ``item()`` synchronization here,
+    # because this function runs on every optimization iteration.
+    return (error * weights).sum() / weights.sum()
 
 
 def residual_l1(r: torch.Tensor) -> torch.Tensor:
