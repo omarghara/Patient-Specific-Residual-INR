@@ -51,6 +51,17 @@ def tv_2d(img: torch.Tensor) -> torch.Tensor:
     return dx + dy
 
 
+def phase_tv_2d(phase: torch.Tensor) -> torch.Tensor:
+    """Wrap-invariant smoothness penalty for a phase map in radians.
+
+    ``1 - cos(delta)`` treats phase values separated by a multiple of ``2*pi``
+    as identical, unlike ordinary TV applied directly to wrapped angles.
+    """
+    dx = (1.0 - torch.cos(phase[1:, :] - phase[:-1, :])).mean()
+    dy = (1.0 - torch.cos(phase[:, 1:] - phase[:, :-1])).mean()
+    return dx + dy
+
+
 def gate_l1(g: torch.Tensor) -> torch.Tensor:
     """Sparsity penalty encouraging the gate to stay closed (trust the prior)."""
     return g.abs().mean()

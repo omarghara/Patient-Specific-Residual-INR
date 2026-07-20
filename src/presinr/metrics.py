@@ -277,3 +277,81 @@ def all_metrics(
         out["mi_prior_recon"] = mi_prior_recon
         out["mi_prior_delta"] = mi_prior_recon - mi_prior_ref
     return out
+
+
+def acquisition_calibrated_longitudinal_metrics(
+    reconstruction,
+    reference,
+    prior,
+    *,
+    reference_to_acquisition: float,
+    prior_to_acquisition: float,
+    mi_bins: int = 32,
+    foreground_threshold: float = 0.05,
+) -> Dict[str, float]:
+    """Evaluate longitudinal change in fixed acquisition-derived units.
+
+    Unlike an oracle scalar alignment of each reconstruction to the reference,
+    these two calibration factors are method-independent.  The reconstruction
+    is already in k-space acquisition units; the normalized reference and DICOM
+    prior are mapped into those same units before change and MI are calculated.
+    Consequently, a calibrated prior copy has exactly zero reconstructed change.
+    """
+    for name, value in (
+        ("reference_to_acquisition", reference_to_acquisition),
+        ("prior_to_acquisition", prior_to_acquisition),
+    ):
+        if not np.isfinite(float(value)) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive, got {value}")
+
+    reference_acquisition = float(reference_to_acquisition) * _mag(reference)
+    prior_acquisition = float(prior_to_acquisition) * _mag(prior)
+    d_reconstruction, d_reference, mask, reference_scale, prior_scale = (
+        _longitudinal_components(
+            reconstruction,
+            reference_acquisition,
+            prior_acquisition,
+            foreground_threshold,
+        )
+    )
+    reference_energy = float(np.dot(d_reference, d_reference))
+    reference_norm = float(np.sqrt(reference_energy))
+    reconstruction_norm = float(np.linalg.norm(d_reconstruction))
+    cosine = (
+        float("nan")
+        if reference_norm <= 1e-12
+        else 0.0
+        if reconstruction_norm <= 1e-12
+        else float(
+            np.dot(d_reconstruction, d_reference)
+            / (reconstruction_norm * reference_norm)
+        )
+    )
+    gain = (
+        float("nan")
+        if reference_energy <= 1e-12
+        else float(np.dot(d_reconstruction, d_reference) / reference_energy)
+    )
+    mi_prior_ref = mutual_information(
+        prior_acquisition,
+        reference_acquisition,
+        bins=mi_bins,
+        mask=mask,
+        x_scale=prior_scale,
+        y_scale=reference_scale,
+    )
+    mi_prior_recon = mutual_information(
+        prior_acquisition,
+        reconstruction,
+        bins=mi_bins,
+        mask=mask,
+        x_scale=prior_scale,
+        y_scale=reference_scale,
+    )
+    return {
+        "change_cosine": cosine,
+        "change_gain": gain,
+        "mi_prior_ref": mi_prior_ref,
+        "mi_prior_recon": mi_prior_recon,
+        "mi_prior_delta": mi_prior_recon - mi_prior_ref,
+    }

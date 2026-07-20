@@ -112,10 +112,61 @@ class FourierMLP(nn.Module):
         return self.final_scale * self.net(feats)
 
 
+class FourierSiren(nn.Module):
+    """SIREN driven by deterministic fixed Gaussian Fourier features.
+
+    This is a controlled coordinate-representation ablation: the Fourier
+    matrix is a non-trainable buffer while all trainable image capacity stays
+    in the SIREN.  Small mapping sizes and bandwidths are preferable for highly
+    undersampled MRI, where unrestricted high frequencies can fit the k-space
+    null space.
+    """
+
+    def __init__(
+        self,
+        in_features: int = 2,
+        out_features: int = 1,
+        hidden_features: int = 128,
+        hidden_layers: int = 4,
+        mapping_size: int = 32,
+        sigma: float = 1.0,
+        seed: Optional[int] = 0,
+        first_omega_0: float = 30.0,
+        hidden_omega_0: float = 30.0,
+        final_scale: float = 1.0,
+    ):
+        super().__init__()
+        if mapping_size <= 0:
+            raise ValueError(f"mapping_size must be positive, got {mapping_size}")
+        if not math.isfinite(float(sigma)) or sigma <= 0:
+            raise ValueError(f"sigma must be finite and positive, got {sigma}")
+        generator = torch.Generator().manual_seed(seed) if seed is not None else None
+        matrix = torch.randn(mapping_size, in_features, generator=generator) * sigma
+        self.register_buffer("B", matrix)
+        self.siren = Siren(
+            in_features=2 * mapping_size,
+            out_features=out_features,
+            hidden_features=hidden_features,
+            hidden_layers=hidden_layers,
+            first_omega_0=first_omega_0,
+            hidden_omega_0=hidden_omega_0,
+            final_scale=final_scale,
+        )
+
+    def encode(self, coords: torch.Tensor) -> torch.Tensor:
+        projection = 2.0 * math.pi * coords @ self.B.t()
+        return torch.cat([torch.sin(projection), torch.cos(projection)], dim=-1)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        return self.siren(self.encode(coords))
+
+
 def build_inr(kind: str = "siren", **kwargs) -> nn.Module:
     kind = kind.lower()
     if kind == "siren":
         return Siren(**kwargs)
     if kind in ("fourier", "ffn", "fourier_mlp"):
         return FourierMLP(**kwargs)
+    if kind in ("fourier_siren", "ff_siren"):
+        return FourierSiren(**kwargs)
     raise ValueError(f"unknown INR kind: {kind}")

@@ -15,8 +15,8 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 
 from .forward import CartesianSense
-from .losses import data_consistency, gate_l1, residual_l1, tv_2d
-from .models.composition import PriorResidualINR
+from .losses import data_consistency, gate_l1, phase_tv_2d, residual_l1, tv_2d
+from .models.composition import PriorMagnitudePhaseINR, PriorResidualINR
 from .models.inr import make_coord_grid
 
 
@@ -40,6 +40,38 @@ class ResidualFitConfig:
 
 
 @dataclass
+class KspaceFitConfig:
+    """Configuration for an unregularized current-only complex INR."""
+
+    iters: int = 2000
+    lr: float = 1e-3
+    log_every: int = 250
+
+
+@dataclass
+class PhaseFitConfig:
+    """Image-space initialization of a phase INR using circular loss."""
+
+    iters: int = 1000
+    lr: float = 1e-4
+    log_every: int = 250
+
+
+@dataclass
+class MagnitudePhaseFitConfig:
+    """K-space fitting of magnitude change and a separate phase field."""
+
+    iters: int = 2000
+    lr: float = 1e-3
+    phase_lr: Optional[float] = None
+    prior_scale_lr: Optional[float] = None
+    lambda_change: float = 1e-3
+    lambda_change_tv: float = 0.0
+    lambda_phase_tv: float = 0.0
+    log_every: int = 250
+
+
+@dataclass
 class ImageFitConfig:
     iters: int = 2000
     lr: float = 1e-3
@@ -58,6 +90,9 @@ class ReconResult:
     history: Dict[str, Any] = field(default_factory=dict)
     residual: Optional[torch.Tensor] = None    # (H, W, 2), post-bound/pre-gate
     gate: Optional[torch.Tensor] = None        # (H, W), if enabled
+    magnitude_residual: Optional[torch.Tensor] = None  # (H, W), if separated
+    phase: Optional[torch.Tensor] = None        # (H, W), radians, if separated
+    prior_scale: Optional[float] = None         # acquisition-unit prior multiplier
 
 
 def fit_prior(
@@ -86,6 +121,50 @@ def fit_prior(
         if verbose and (it % cfg.log_every == 0 or it == cfg.iters - 1):
             print(f"[prior] iter {it:5d}  L1={loss.item():.5f}")
     return hist
+
+
+def fit_phase_inr(
+    phase_inr: torch.nn.Module,
+    target_phase: torch.Tensor,
+    cfg: PhaseFitConfig = PhaseFitConfig(),
+    weights: Optional[torch.Tensor] = None,
+    device: Optional[torch.device] = None,
+    verbose: bool = True,
+) -> Dict[str, list]:
+    """Initialize a scalar phase INR with a wrap-invariant circular loss.
+
+    ``target_phase`` is in radians. Optional nonnegative ``weights`` are useful
+    for suppressing unreliable background phase in a zero-filled image.
+    """
+    device = device or target_phase.device
+    phase_inr = phase_inr.to(device)
+    height, width = target_phase.shape
+    coords = make_coord_grid(height, width, device=device)
+    target = target_phase.reshape(-1).to(device).float()
+    if weights is None:
+        weight = torch.ones_like(target)
+    else:
+        if tuple(weights.shape) != (height, width):
+            raise ValueError(
+                f"phase weights must have shape {(height, width)}, got {tuple(weights.shape)}"
+            )
+        weight = weights.reshape(-1).to(device).float().clamp_min(0.0)
+    denominator = weight.sum().clamp_min(1e-8)
+
+    optimizer = torch.optim.Adam(phase_inr.parameters(), lr=cfg.lr)
+    history = {"loss": []}
+    for iteration in range(cfg.iters):
+        optimizer.zero_grad(set_to_none=True)
+        prediction = phase_inr(coords)[..., 0]
+        loss = ((1.0 - torch.cos(prediction - target)) * weight).sum() / denominator
+        loss.backward()
+        optimizer.step()
+        history["loss"].append(loss.item())
+        if verbose and (
+            iteration % cfg.log_every == 0 or iteration == cfg.iters - 1
+        ):
+            print(f"[phase-init] iter {iteration:5d}  circular={loss.item():.6f}")
+    return history
 
 
 def _masked_l1(pred_flat, target_flat, mask_flat):
@@ -327,3 +406,150 @@ def fit_residual(
         hist["raw_residual_map"] = residual
         hist["gate_map"] = gate
     return ReconResult(recon=recon.detach(), history=hist, residual=residual, gate=gate)
+
+
+def fit_current_only(
+    inr: torch.nn.Module,
+    op: CartesianSense,
+    ksp: torch.Tensor,
+    shape: Tuple[int, int],
+    cfg: KspaceFitConfig = KspaceFitConfig(),
+    device: Optional[torch.device] = None,
+    verbose: bool = True,
+) -> ReconResult:
+    """Fit a random complex INR using only measured follow-up k-space.
+
+    This is the prior-free baseline needed to determine whether a longitudinal
+    prior adds value beyond the implicit bias of the coordinate network itself.
+    ``inr`` must return real/imaginary channels in its final dimension.
+    """
+    device = device or ksp.device
+    inr = inr.to(device)
+    op = op.to(device)
+    ksp = ksp.to(device)
+    height, width = shape
+    coords = make_coord_grid(height, width, device=device)
+
+    with torch.no_grad():
+        probe = inr(coords[:1])
+    if probe.shape[-1] != 2:
+        raise ValueError(
+            f"current-only INR must return 2 real/imag channels, got {probe.shape[-1]}"
+        )
+
+    optimizer = torch.optim.Adam(inr.parameters(), lr=cfg.lr)
+    history = {"loss": [], "dc": []}
+    for iteration in range(cfg.iters):
+        optimizer.zero_grad(set_to_none=True)
+        prediction = inr(coords)
+        image = torch.complex(prediction[..., 0], prediction[..., 1]).reshape(
+            height, width
+        )
+        dc = data_consistency(op(image), ksp, mask=op.mask)
+        dc.backward()
+        optimizer.step()
+        history["loss"].append(dc.item())
+        history["dc"].append(dc.item())
+        if verbose and (
+            iteration % cfg.log_every == 0 or iteration == cfg.iters - 1
+        ):
+            print(f"[current-only] iter {iteration:5d}  dc={dc.item():.6f}")
+
+    with torch.no_grad():
+        prediction = inr(coords)
+        recon = torch.complex(prediction[..., 0], prediction[..., 1]).reshape(
+            height, width
+        )
+    return ReconResult(recon=recon.detach(), history=history)
+
+
+def fit_magnitude_phase_residual(
+    model: PriorMagnitudePhaseINR,
+    op: CartesianSense,
+    ksp: torch.Tensor,
+    shape: Tuple[int, int],
+    cfg: MagnitudePhaseFitConfig = MagnitudePhaseFitConfig(),
+    device: Optional[torch.device] = None,
+    verbose: bool = True,
+) -> ReconResult:
+    """Fit sparse magnitude change and independent phase from measured k-space."""
+    device = device or ksp.device
+    model = model.to(device)
+    op = op.to(device)
+    ksp = ksp.to(device)
+    model.freeze_prior()
+
+    height, width = shape
+    coords = make_coord_grid(height, width, device=device)
+    with torch.no_grad():
+        prior_mag = model.prior_magnitude(coords)
+
+    phase_lr = cfg.lr if cfg.phase_lr is None else cfg.phase_lr
+    parameter_groups = [
+        {"params": model.magnitude_residual_inr.parameters(), "lr": cfg.lr},
+        {"params": model.phase_inr.parameters(), "lr": phase_lr},
+    ]
+    if model.log_prior_scale.requires_grad:
+        scale_lr = cfg.lr if cfg.prior_scale_lr is None else cfg.prior_scale_lr
+        parameter_groups.append({"params": [model.log_prior_scale], "lr": scale_lr})
+    optimizer = torch.optim.Adam(parameter_groups)
+    history = {
+        "loss": [],
+        "dc": [],
+        "reg": [],
+        "change_l1": [],
+        "change_tv": [],
+        "phase_tv": [],
+        "prior_scale": [],
+    }
+    for iteration in range(cfg.iters):
+        optimizer.zero_grad(set_to_none=True)
+        _, delta, magnitude, phase = model.components(coords, prior_mag=prior_mag)
+        image = torch.polar(magnitude, phase).reshape(height, width)
+        dc = data_consistency(op(image), ksp, mask=op.mask)
+        change_l1 = cfg.lambda_change * delta.abs().mean()
+        change_tv = (
+            cfg.lambda_change_tv * tv_2d(delta.reshape(height, width))
+            if cfg.lambda_change_tv > 0
+            else torch.zeros((), device=device)
+        )
+        phase_tv = (
+            cfg.lambda_phase_tv * phase_tv_2d(phase.reshape(height, width))
+            if cfg.lambda_phase_tv > 0
+            else torch.zeros((), device=device)
+        )
+        regularization = change_l1 + change_tv + phase_tv
+        loss = dc + regularization
+        loss.backward()
+        optimizer.step()
+
+        history["loss"].append(loss.item())
+        history["dc"].append(dc.item())
+        history["reg"].append(float(regularization))
+        history["change_l1"].append(float(change_l1))
+        history["change_tv"].append(float(change_tv))
+        history["phase_tv"].append(float(phase_tv))
+        history["prior_scale"].append(float(model.prior_scale.detach()))
+        if verbose and (
+            iteration % cfg.log_every == 0 or iteration == cfg.iters - 1
+        ):
+            print(
+                f"[mag-phase] iter {iteration:5d}  "
+                f"loss={loss.item():.6f}  dc={dc.item():.6f}"
+            )
+
+    with torch.no_grad():
+        _, delta, magnitude, phase = model.components(coords, prior_mag=prior_mag)
+        recon = torch.polar(magnitude, phase).reshape(height, width)
+        magnitude_residual = delta.reshape(height, width).detach()
+        phase_map = phase.reshape(height, width).detach()
+        history["magnitude_map"] = magnitude.reshape(height, width).detach()
+        history["magnitude_residual_map"] = magnitude_residual
+        history["phase_map"] = phase_map
+    return ReconResult(
+        recon=recon.detach(),
+        history=history,
+        magnitude_residual=magnitude_residual,
+        phase=phase_map,
+        prior_scale=float(model.prior_scale.detach()),
+    )

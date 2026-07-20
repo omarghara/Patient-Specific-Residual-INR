@@ -16,6 +16,18 @@ sensitivities) with data-consistency + residual-sparsity losses. See
 [context/project-proposal.tex](context/project-proposal.tex) for the full plan
 and [context/ramp-up.md](context/ramp-up.md) for the literature review.
 
+A phase-aware variation keeps the longitudinal residual in magnitude space,
+calibrates the DICOM prior into follow-up acquisition units using measured
+k-space only, and learns acquisition phase independently:
+
+```
+x_hat(c) = clamp_min(alpha * f_prior(c) + delta_m(c), 0) * exp(i * phase(c))
+```
+
+Only `delta_m` receives change-sparsity regularization; the phase field can use
+wrap-invariant circular TV. This avoids forcing the magnitude-only DICOM prior's
+missing phase into a supposedly sparse complex change residual.
+
 ## Status
 
 Staged plan: **image space first**, then k-space data consistency.
@@ -35,7 +47,15 @@ Staged plan: **image space first**, then k-space data consistency.
       validated (`scripts/recon_slice.py`); exact SLAM center-crop/pad geometry
       is covered by regression tests. Needs regularization tuning.
 - [ ] Change-stratified evaluation on the full test split (`--test-only`)
-- [ ] Baselines: current-only INR, NeRP-style, LACS
+- [x] Review baselines: current-only complex INR and NeRP-style fine-tuning in
+      `notebooks/kspace_inr_pipeline.ipynb`
+- [x] Reference-free magnitude/phase tuning protocol: acquired-line k-space
+      holdout, calibrated prior scale, zero-residual initialization, controlled
+      width/sparsity/phase/Fourier ablations, and a branch-matched current-only
+      INR (`notebooks/magnitude_phase_formulation_followup.ipynb`)
+- [x] Locked multi-subject held-out evaluation notebook, with scan 16 excluded
+      from evaluation (`notebooks/magnitude_phase_heldout_evaluation.ipynb`)
+- [ ] LACS baseline
 - [x] Image-space residual-support gate with a bounded pre-gate residual,
       pre-gate sparsity, and gate TV (removes the gate/residual scale degeneracy)
 - [ ] Gated k-space evaluation and gate calibration/ablation
@@ -48,6 +68,9 @@ mamba activate presinr
 pip install -e .        # optional: makes `presinr` importable without sys.path
 
 pytest tests/           # forward-model adjoint test etc.
+
+# dedicated notebook kernel (already created as `presinr-notebook`)
+conda activate presinr-notebook
 ```
 
 ## Quickstart
@@ -66,6 +89,10 @@ python scripts/poc_image_space.py --source slam --middle-only
 
 # 4. Stage 1: k-space data-consistency reconstruction with baselines + metrics
 python scripts/recon_slice.py --index 0 --middle-only
+
+# 5. Rebuild the generated experiment notebooks after editing their builders
+python scripts/build_magnitude_phase_followup_notebook.py
+python scripts/build_magnitude_phase_heldout_notebook.py
 ```
 
 ## Layout
@@ -74,16 +101,21 @@ python scripts/recon_slice.py --index 0 --middle-only
 src/presinr/
   fft.py            centered FFT (ifftshift → fftn(ortho) → fftshift)
   forward.py        CartesianSense: y = M F S x  (+ adjoint / zero-filled)
-  losses.py         data_consistency, residual_l1, tv_2d, gate_l1
+  losses.py         data consistency, residual/TV/gate losses, circular phase TV
   metrics.py        PSNR/SSIM/NMSE, signed change cosine/gain, mutual information
-  recon.py          fit_prior (stage 1), fit_residual (stage 2)
+  calibration.py    measured-k-space prior/reference intensity calibration
+  sampling.py       LAPS masks and acquired-line train/validation holdout
+  recon.py          prior, current-only, complex-residual, and magnitude-phase fits
+  experiments/
+    magnitude_phase.py  shared reference-free trainer/checkpoint selection
   models/
-    inr.py          Siren, FourierMLP, coordinate grid
-    composition.py  PriorResidualINR (prior + residual, optional gate)
+    inr.py          Siren, FourierMLP/FourierSiren, coordinate grid
+    composition.py  residual, magnitude-phase, and matched current-only models
   data/
     phantom.py      synthetic multi-coil longitudinal phantom
     slam.py         SLAM downloader (mirrors laps.slam) + per-slice dataset
 scripts/            fetch_slam, smoke_phantom, recon_slice
+notebooks/          tuning, locked evaluation, and comparison pipelines
 configs/            slice_default.yaml
 tests/              forward, geometry, metrics/MI, losses, and gate constraints
 ```

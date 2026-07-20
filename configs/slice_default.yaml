@@ -25,6 +25,33 @@ residual_fit:
   lambda_raw_res: 0.0       # set >0 with a gate to remove g*r scale degeneracy
   lambda_gate_tv: 0.0       # spatial smoothing on the gate itself
 
+# Prior-free baseline: a random real/imaginary INR fitted only to current k-space.
+current_only_fit:
+  hidden_features: 256
+  hidden_layers: 4
+  iters: 3000
+  lr: 1.0e-3
+
+# Phase-aware variation: x = max(prior + delta_m, 0) * exp(i * phase).
+magnitude_phase:
+  magnitude_change_inr:
+    hidden_features: 128
+    hidden_layers: 4
+  phase_inr:
+    hidden_features: 64
+    hidden_layers: 3
+  phase_init:
+    iters: 1000
+    lr: 1.0e-4
+    gaussian_sigma: 2.0     # smooth zero-filled complex image before angle()
+  fit:
+    iters: 3000
+    lr: 1.0e-3              # magnitude-change INR
+    phase_lr: 3.0e-4
+    lambda_change: 1.0e-3   # sparsity applies only to scalar delta_m
+    lambda_change_tv: 0.0
+    lambda_phase_tv: 1.0e-5 # wrap-invariant circular phase smoothness
+
 # gate is disabled for the first (plain prior+residual) target model
 gate:
   enabled: false

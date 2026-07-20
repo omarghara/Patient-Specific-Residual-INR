@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from presinr.metrics import (
+    acquisition_calibrated_longitudinal_metrics,
     all_metrics,
     change_cosine,
     change_gain,
@@ -87,3 +88,55 @@ def test_all_metrics_reports_requested_prior_followup_mi_and_target_delta():
     assert out["mi_prior_recon"] == pytest.approx(out["mi_prior_ref"], abs=1e-12)
     assert out["mi_prior_delta"] == pytest.approx(0.0, abs=1e-12)
     assert "cpe" not in out and "pbs" not in out
+
+
+def test_acquisition_calibrated_change_does_not_oracle_align_reconstruction():
+    prior, ref = _longitudinal_example()
+    reference_scale = 1.7
+    prior_scale = 2.2
+    calibrated_prior = prior_scale * prior
+    calibrated_reference = reference_scale * ref
+    true_change = calibrated_reference - calibrated_prior
+    half = calibrated_prior + 0.5 * true_change
+
+    copied = acquisition_calibrated_longitudinal_metrics(
+        calibrated_prior,
+        ref,
+        prior,
+        reference_to_acquisition=reference_scale,
+        prior_to_acquisition=prior_scale,
+    )
+    perfect = acquisition_calibrated_longitudinal_metrics(
+        calibrated_reference,
+        ref,
+        prior,
+        reference_to_acquisition=reference_scale,
+        prior_to_acquisition=prior_scale,
+    )
+    partial = acquisition_calibrated_longitudinal_metrics(
+        half,
+        ref,
+        prior,
+        reference_to_acquisition=reference_scale,
+        prior_to_acquisition=prior_scale,
+    )
+
+    assert copied["change_cosine"] == pytest.approx(0.0, abs=1e-7)
+    assert copied["change_gain"] == pytest.approx(0.0, abs=1e-7)
+    assert perfect["change_cosine"] == pytest.approx(1.0, abs=1e-6)
+    assert perfect["change_gain"] == pytest.approx(1.0, abs=1e-6)
+    assert partial["change_cosine"] == pytest.approx(1.0, abs=1e-6)
+    assert partial["change_gain"] == pytest.approx(0.5, abs=2e-2)
+
+
+@pytest.mark.parametrize("factor", [0.0, -1.0, np.inf, np.nan])
+def test_acquisition_calibrated_metrics_reject_invalid_scale(factor):
+    prior, ref = _longitudinal_example()
+    with pytest.raises(ValueError, match="reference_to_acquisition"):
+        acquisition_calibrated_longitudinal_metrics(
+            ref,
+            ref,
+            prior,
+            reference_to_acquisition=factor,
+            prior_to_acquisition=1.0,
+        )

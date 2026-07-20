@@ -1,0 +1,26 @@
+{
+  "sample_index": 1490,
+  "selected_spec": {
+    "name": "low_lr",
+    "delta_width": 128,
+    "delta_layers": 4,
+    "delta_lr": 0.0001,
+    "phase_lr": 3e-05,
+    "scale_lr": 0.001,
+    "lambda_change": 0.001,
+    "lambda_change_tv": 0.0,
+    "lambda_phase_tv": 1e-05,
+    "lambda_scale": 0.0001,
+    "magnitude_bound": null,
+    "learn_prior_scale": false,
+    "phase_source": "zf",
+    "schedule": "cosine",
+    "grad_clip": 1.0
+  },
+  "selected_iterations": 1200,
+  "selection_accelerations": [
+    6,
+    9
+  ],
+  "warning": "Selected on one development slice using reference metrics; freeze before held-out evaluation."
+}
